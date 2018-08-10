@@ -1,0 +1,170 @@
+C51 COMPILER V8.18   PCA                                                                   10/24/2013 12:06:06 PAGE 1   
+
+
+C51 COMPILER V8.18, COMPILATION OF MODULE PCA
+OBJECT MODULE PLACED IN .\output\PCA.obj
+COMPILER INVOKED BY: E:\Keil\C51\BIN\C51.EXE sourcecode\PCA.c BROWSE DEBUG OBJECTEXTEND PRINT(.\list\PCA.lst) OBJECT(.\o
+                    -utput\PCA.obj)
+
+line level    source
+
+   1          
+   2          #include<REG52.H> 
+   3          
+   4          #include "stc12l5612.h"
+   5          #include "ut_debug.h"
+   6          #include "delay.h"
+   7          
+   8          #include "pca.h"
+   9          
+  10          extern unsigned char code PCM_Warn[];
+  11          
+  12          
+  13           ////////////////////////////////////////////
+  14           // 
+  15           // 环形缓冲区操作（缓存用于填充PCA的数据）
+  16           //
+  17           /////////////////////////////////////////////
+  18          unsigned char idata pca_code_buf[8] ;
+  19          unsigned char pca_buf_wr=0;     // 写指针
+  20          unsigned char pca_buf_rd=0;     // 读指针
+  21          
+  22          unsigned char pac_code_ax=0;
+  23          unsigned short pca_over_cnt=0;
+  24          
+  25          
+  26          // 用于... 判断缓冲区是否有空余
+  27          unsigned char PCA_buf_fill_validate()
+  28          {
+  29   1              unsigned char next_wr, cc;
+  30   1      
+  31   1              if(pca_buf_wr != (unsigned char)(sizeof(pca_code_buf)-1) ) // 到了末尾？        
+  32   1                      next_wr = pca_buf_wr + 1;
+  33   1              else
+  34   1                      next_wr = 0;            // 绕回到 0
+  35   1              cc = (next_wr!=pca_buf_rd);
+  36   1      
+  37   1              #ifdef __UT_DEBUG__x
+                      if(!cc)
+                      {
+                              char temp[7]="w= r= "; 
+                              temp[2] = 0x30+ pca_buf_wr      ;
+                              temp[5] = 0x30+ pca_buf_rd      ; 
+                              DEBUG_PUTS_(temp);
+                      }
+                      #endif
+  46   1              return cc;
+  47   1      }
+  48          
+  49          // 用于... 填写数据到缓冲区
+  50          // 使用前，先调用PCA_buf_fill_validate()确认缓冲区未满 
+  51          void PCA_buf_fill_code(unsigned char pcm)   
+  52          {
+  53   1              // 把PCM码放入缓冲区
+  54   1              pca_code_buf[pca_buf_wr] = pcm;  
+C51 COMPILER V8.18   PCA                                                                   10/24/2013 12:06:06 PAGE 2   
+
+  55   1      
+  56   1              // 移动缓冲区的写指针
+  57   1              if(pca_buf_wr != (unsigned char)(sizeof(pca_code_buf)-1) ) // 到了末尾？        
+  58   1                      pca_buf_wr++;
+  59   1              else
+  60   1                      pca_buf_wr = 0;         // 绕回到 0
+  61   1      
+  62   1              EPCA_LVD= 1 ; // 开 PCA 中断
+  63   1      }
+  64          
+  65          // 用于PCA中断调用，读缓冲区的数据至PCA寄存器
+  66          void PCA_buf_read_code()
+  67          {                                                        
+  68   1              if( pca_buf_rd != pca_buf_wr )  
+  69   1              {                                                                 
+  70   2                      /* 把缓冲区的PCM码读出  */              
+  71   2                      pac_code_ax      = pca_code_buf[pca_buf_rd];             
+  72   2                                                                                              
+  73   2                      /* 移动缓冲区的读指针   */                
+  74   2                      if(pca_buf_rd != (unsigned char)(sizeof(pca_code_buf)-1) ) 
+  75   2                              pca_buf_rd++;                                                                            
+  76   2                      else                                                                                                      
+  77   2                              pca_buf_rd = 0;                                                                          
+  78   2              }                                                                                                                         
+  79   1              else                                                                                                             
+  80   1              {                                                                                                                        
+  81   2                      pac_code_ax = 0x80;  /*无效时的默认值：50%duty cycle;   */
+  82   2                                      
+  83   2                      EPCA_LVD= 0 ; //   关PCA中断                            
+  84   2              }                                                                                                                       
+  85   1      }
+  86          
+  87          /////////////////////////////////////////////////////////
+  88          // 用程序内置的PCM数据测试PCA
+  89          void PCA_Test_SampleVox()
+  90          {
+  91   1              unsigned short sz;
+  92   1      
+  93   1              for(sz=0; sz<1338; sz++)
+  94   1              {
+  95   2                      while( !PCA_buf_fill_validate() )       // 等待PCA缓冲有空
+  96   2                              DELAY_US(10);
+  97   2      
+  98   2                      PCA_buf_fill_code( PCM_Warn[sz] ); // 填入PCA缓冲
+  99   2              }
+ 100   1              for(sz=0; sz<200; sz++) ;        // delay
+ 101   1      }
+ 102          
+ 103          /////////////////////////////////////////////////////////////////////////
+ 104          
+ 105          /////////////////////////////////////////////////////////////////////////
+ 106          
+ 107          void PCA_init()
+ 108          {
+ 109   1              CCON = 0; // Initial PCA control register,PCA timer stop/Clear CF flag/ Clear all module interrupt flag
+ 110   1      
+ 111   1              CMOD=0x03;  //0000,0011 setup PCA timer source as Fosc/2, PCA timer overflow interrupt enable(ECF=1)
+ 112   1      
+ 113   1              CL=0x00;        // Reset PCA base timer
+ 114   1              CH=0xff;
+ 115   1      
+ 116   1              CCAP0L=0x80;  //same as CCAP0H
+C51 COMPILER V8.18   PCA                                                                   10/24/2013 12:06:06 PAGE 3   
+
+ 117   1              CCAP0H=0x80;  //PWM0 output 50% duty cycle square wave
+ 118   1      
+ 119   1              CCAPM0=0x42;  //0100,0010 PCA module-0 work in 8bit PWM mode 
+ 120   1      
+ 121   1              EPCA_LVD = 1;  // PCA   interrupt
+ 122   1      
+ 123   1              CR=1;         // PCA Timer start run
+ 124   1      
+ 125   1              EA=1;
+ 126   1      }
+ 127          
+ 128          
+ 129          void ISR_PCA_ovr()  interrupt 6 //using 2
+ 130          {
+ 131   1              pca_over_cnt++;
+ 132   1              if(pca_over_cnt==0xffff/80)      led1=0;                                  //??
+ 133   1              if(pca_over_cnt==0xffff/70)     {led1=1; pca_over_cnt=0;}
+ 134   1      
+ 135   1              CH=0xfb;                          //5次计数后溢出--中断
+ 136   1              
+ 137   1              PCA_buf_read_code();     // 把缓冲区的PCM码填入 /
+ 138   1              CCAP0H = pac_code_ax;
+ 139   1      
+ 140   1              CF=0;
+ 141   1      }
+ 142          /////////////////////////////////////////////////
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    236    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      5       1
+   IDATA SIZE       =      8    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

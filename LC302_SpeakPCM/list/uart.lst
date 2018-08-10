@@ -1,0 +1,139 @@
+C51 COMPILER V8.18   UART                                                                  10/24/2013 12:06:13 PAGE 1   
+
+
+C51 COMPILER V8.18, COMPILATION OF MODULE UART
+OBJECT MODULE PLACED IN .\output\uart.obj
+COMPILER INVOKED BY: E:\Keil\C51\BIN\C51.EXE sourcecode\uart.c BROWSE DEBUG OBJECTEXTEND PRINT(.\list\uart.lst) OBJECT(.
+                    -\output\uart.obj)
+
+line level    source
+
+   1          #include<REG52.H> 
+   2          #include "stc12l5612.h"
+   3          #include "uart.h"
+   4          
+   5          #define BAUDRELOAD 0xfA             //波特率采用1T--115200bps   12T--9600bps 
+   6          #define COMM_BUFF_LEN 20
+   7          
+   8          /* 接收缓冲区 */
+   9          unsigned char idata comm_buff[COMM_BUFF_LEN];
+  10          /* 缓冲区读写指针 */
+  11          unsigned char data comm_buff_ptr = 0;
+  12          unsigned char UART_timeout_count = 0;
+  13          /* 检验和 */
+  14          unsigned char comm_bcc = 0;
+  15          /* 接收标志 */
+  16          bit bdata comm_RStart = 0;      //接收到包开始标志
+  17          bit bdata comm_REnd = 0;        //接收到包结束标志
+  18          
+  19          /* 完成标志 */
+  20          bit bdata comm_Stored = 0;      //数据接收完毕，数据包可用
+  21          
+  22          
+  23          
+  24          
+  25          /////////////////////////////////////////////////////////////////////////
+  26          ///串口初始化
+  27          void uart_int()
+  28          {
+  29   1              SCON  = 0x50;                      // mode 1: 8-bit UART, enable receiver
+  30   1              TMOD |= 0x20;                      // timer 1 mode 2: 8-Bit reload
+  31   1          TH1 = BAUDRELOAD;                              //定时器1作串行口波特率发生器
+  32   1          TL1 = BAUDRELOAD;
+  33   1      //      AUXR|=0x40;                             //1T ----115200BPS
+  34   1          AUXR&=~0x40;                            /*12T----9600BPS  */ 
+  35   1              TR1 = 1;                                        //启动定时器
+  36   1              ET1     = 0;                                            // timer 1 interrupt disable
+  37   1              TI = 0;
+  38   1              RI = 0;
+  39   1              ES = 1;                         // enable serial port interrupt
+  40   1              EA = 1;
+  41   1      }
+  42          
+  43          
+  44          ///////////////////////////////////////////////////////////////////////
+  45          ///
+  46          
+  47          //////////////////////////////////////////////////////////////////////
+  48          //  串口中断程序
+  49          //  接收格式：0x02 + 数据(nbyte) + 0x03 + BCC(1byte)
+  50          
+  51          void UART_Isr() interrupt 4     //using 1
+  52          {
+  53   1              unsigned char temp;
+  54   1              if(RI)
+C51 COMPILER V8.18   UART                                                                  10/24/2013 12:06:13 PAGE 2   
+
+  55   1              {
+  56   2                      UART_timeout_count = 0;
+  57   2                      RI = 0;
+  58   2                      temp = SBUF;
+  59   2                      
+  60   2                      if(temp==0x02&&(!comm_REnd))    // 包头   
+  61   2                      {
+  62   3                              RESET_RX;
+  63   3                              comm_RStart = 1;
+  64   3                              return;
+  65   3                      }
+  66   2                      if( temp==0x03&&comm_RStart&&(!comm_REnd) )        // 包尾
+  67   2                      {
+  68   3                              comm_REnd = 1;                  
+  69   3                              return;
+  70   3                      }
+  71   2      
+  72   2                      if( comm_REnd && comm_RStart )  // 已经收到头和尾，接着是校验位
+  73   2                      {
+  74   3                              if(comm_bcc == temp) // 校验正确，收到完整的包，
+  75   3                              {
+  76   4                                      comm_Stored = 1; 
+  77   4                              }
+  78   3                              RESET_RX;
+  79   3                              return;
+  80   3                      }
+  81   2      
+  82   2      
+  83   2                      comm_buff[comm_buff_ptr] = temp;   //填写缓存，注意：包头、包尾、校验位都不在缓存内，仅仅包的内容
+  84   2                      comm_buff_ptr++;        
+  85   2      
+  86   2                      comm_bcc = comm_bcc^temp;       // 计算除了包头、包尾、校验位之外的和
+  87   2      
+  88   2                      if(comm_buff_ptr==COMM_BUFF_LEN)        // 缓冲区溢出
+  89   2                      {
+  90   3                              RESET_RX;
+  91   3                      }
+  92   2              }
+  93   1              else
+  94   1                      TI=0;
+  95   1      }
+  96          
+  97          ///////////////////////////////////////////////////////////////////////////
+  98          //////////////////////////////////////////////////////////////////////////
+  99          // 定时器0初始化
+ 100          void T0_int()
+ 101          {       
+ 102   1              TMOD |= 0x01;                      // timer0 mode 1: 16-Bit
+ 103   1              TMOD&=~0x03;    // 初始化定时器0的C/T、M1、M0=0
+ 104   1          AUXR&=~0x80;                //T0x12 为0  
+ 105   1              TL0 = 0;   
+ 106   1              TH0 = 0;       
+ 107   1              TF0 = 0;                                //清T0中断标志
+ 108   1              TR0 = 1;
+ 109   1              ET0 = 0;
+ 110   1      }
+ 111          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    158    ----
+   CONSTANT SIZE    =   ----    ----
+C51 COMPILER V8.18   UART                                                                  10/24/2013 12:06:13 PAGE 3   
+
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      6    ----
+   IDATA SIZE       =     20    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

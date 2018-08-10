@@ -1,0 +1,14 @@
+".\output\STARTUP.obj",
+".\output\main.obj",
+".\output\PCA.obj",
+".\output\VoxSamples.obj",
+".\output\spiflash.obj",
+".\output\SpeakVox.obj",
+".\output\CRC16.obj",
+".\output\xmodem.obj",
+".\output\ATE_Shell.obj",
+".\output\UT_DEBUG.obj",
+".\output\speakctl.obj",
+".\output\uart.obj" 
+TO ".\output\LC301_SpeakPCM_V1.1" 
+PRINT(".\list\LC301_SpeakPCM_V1.m51") RAMSIZE(256) 

@@ -1,0 +1,247 @@
+C51 COMPILER V8.18   SPEAKVOX                                                              10/24/2013 12:06:08 PAGE 1   
+
+
+C51 COMPILER V8.18, COMPILATION OF MODULE SPEAKVOX
+OBJECT MODULE PLACED IN .\output\SpeakVox.obj
+COMPILER INVOKED BY: E:\Keil\C51\BIN\C51.EXE sourcecode\SpeakVox.c BROWSE DEBUG OBJECTEXTEND PRINT(.\list\SpeakVox.lst) 
+                    -OBJECT(.\output\SpeakVox.obj)
+
+line level    source
+
+   1          
+   2          
+   3          #include "W25X.H"
+   4          #include "PCA.H"
+   5          #include "ut_debug.h"
+   6          #include "SpeakVox.h"
+   7          
+   8          
+   9          /*******************************************************************************
+  10                                                  语音数据在FLASH中的结构         
+  11          
+  12           +-------------------------------------------------------------------------+
+  13           | 语音0信息块(*) | 语音1信息块(*) | 、、、、、、、、、、、、、、、、、、、|
+  14           | 、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、|
+  15           | 、、、、、、、、、、、、、、、、、、、、、、、、、、、| 语音n信息块(*)  |
+  16           +-------------------------------------------------------------------------+
+  17           | 语音0的PCM数据(x bytes)  |  语音1的PCM数据(y bytes)  |  、、、、、、、、|
+  18           | 、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、、|
+  19           | 、、、、、、、、、、、、、、、、、、、、、、、| 语音n的PCM数据(z bytes) |  
+  20           |                                                                                                                                                 |
+  21           +-------------------------------------------------------------------------+
+  22          其中：
+  23             “语音信息块”表示了该语音的PCM数据在FLASH中地址、长度；
+  24             每个“语音信息块”都由固定的 8 字节 构成，其结构如下：
+  25             +-------------+---------------------+---------------------+---------------+
+  26             +  ID(1bytes) | PCM数据地址(3bytes) |  PCM数据长度(3ytes) | 校验(1bytes)  |
+  27             +-------------+---------------------+---------------------+---------------+
+  28             
+  29             ID：按存储的物理顺序，依次从0～255，它与程序所支持的语音ID对应。
+  30             校验：前7个字节的异或和
+  31          ************************************************************************************/
+  32          #define VOX_INF_BLOCK_LEN 8
+  33          
+  34          
+  35          #define INVALID_ID  ((unsigned char)0xFF)
+  36          
+  37          //////////////////////////////////////////////////////////////////////////////////////
+  38          // 当前要播放的那条语音的PCM数据地址、长度
+  39          unsigned long int idata ulCurrentVox_Addr=0 ;
+  40          unsigned long int ulCurrentVox_Len=0 ;
+  41          
+  42          // 即将要播放的语音ID列表
+  43          unsigned char idata VoxPlayList[30]="";
+  44          unsigned char idata VoxListPutPtr=0;
+  45          unsigned char idata VoxListGetPtr=0;
+  46          
+  47          
+  48          /*
+  49           根据语音ID，读取该语音的PCM数据地址、长度，保存到当前变量
+  50          */
+  51          void Vox_read_inf_to_current(unsigned char ID)
+  52          {
+  53   1              unsigned short inf_addr ;
+  54   1              unsigned char IDx, sum;
+C51 COMPILER V8.18   SPEAKVOX                                                              10/24/2013 12:06:08 PAGE 2   
+
+  55   1      
+  56   1              if(ID>MAX_VOX_ID) return;
+  57   1      
+  58   1              inf_addr = ID * VOX_INF_BLOCK_LEN; // 每个信息块是固定的字节数
+  59   1      
+  60   1              SPI_Read_Start(inf_addr);
+  61   1      
+  62   1              IDx = SPI_Get_Byte();
+  63   1              DEBUG_ASSERT_( ID==IDx );
+  64   1      
+  65   1              ((uchar*)&ulCurrentVox_Addr)[0] = 0;
+  66   1              ((uchar*)&ulCurrentVox_Addr)[1] = SPI_Get_Byte();
+  67   1              ((uchar*)&ulCurrentVox_Addr)[2] = SPI_Get_Byte();
+  68   1              ((uchar*)&ulCurrentVox_Addr)[3] = SPI_Get_Byte();
+  69   1      
+  70   1              ((uchar*)&ulCurrentVox_Len)[0] = 0;
+  71   1              ((uchar*)&ulCurrentVox_Len)[1] = SPI_Get_Byte();
+  72   1              ((uchar*)&ulCurrentVox_Len)[2] = SPI_Get_Byte();
+  73   1              ((uchar*)&ulCurrentVox_Len)[3] = SPI_Get_Byte();
+  74   1      
+  75   1              sum = SPI_Get_Byte();
+  76   1              DEBUG_ASSERT_( sum==0x0a );
+  77   1      
+  78   1              SPI_Read_End();
+  79   1      
+  80   1              DEBUG_PUTS_("Vox Read Info: ");
+  81   1              DEBUG_PRINTF_NUM_("VOX ID=%d ", ID);
+  82   1              DEBUG_PRINTF_NUM_("Addr=%X ", ulCurrentVox_Addr);
+  83   1              DEBUG_PRINTF_NUM_("Len=%x ", ulCurrentVox_Len);
+  84   1              DEBUG_PUTS_(" \n");
+  85   1      
+  86   1              if(ulCurrentVox_Addr==0xFFffFF || ulCurrentVox_Len==0xFFffFF)
+  87   1              {
+  88   2                      ulCurrentVox_Addr=0;
+  89   2                      ulCurrentVox_Len=0;     
+  90   2              }
+  91   1      }
+  92          
+  93          /*
+  94                  设置与读取播放列表的ID值
+  95          */
+  96          void Vox_PlayList_Add(unsigned char ID)
+  97          {
+  98   1              DEBUG_ASSERT_( VoxListPutPtr<sizeof(VoxPlayList) );
+  99   1      
+ 100   1              VoxPlayList[VoxListPutPtr] = ID;
+ 101   1              VoxListPutPtr++;        
+ 102   1      }
+ 103          //
+ 104          unsigned char Vox_PlayList_Get()
+ 105          {
+ 106   1              unsigned char ID;
+ 107   1              if( VoxListGetPtr != VoxListPutPtr)
+ 108   1              {
+ 109   2                      ID = VoxPlayList[VoxListGetPtr];
+ 110   2                      VoxListGetPtr++;
+ 111   2              }
+ 112   1              else
+ 113   1              {       
+ 114   2                      ID = INVALID_ID;         // 无效ID
+ 115   2                      VoxListGetPtr = VoxListPutPtr = 0 ; // 列表复位
+ 116   2              }
+C51 COMPILER V8.18   SPEAKVOX                                                              10/24/2013 12:06:08 PAGE 3   
+
+ 117   1      
+ 118   1              return ID;      
+ 119   1      }
+ 120          
+ 121          // 播放列表空？
+ 122          unsigned char Vox_PlayList_Empty()
+ 123          {
+ 124   1              return  VoxListGetPtr==0 && VoxListPutPtr==0;
+ 125   1      }
+ 126          
+ 127          // 当前这条声音播放完了？
+ 128          unsigned char Vox_CurrPlaying_Done()
+ 129          {
+ 130   1              return ulCurrentVox_Len==0 ;
+ 131   1      }
+ 132          
+ 133          /*
+ 134                  准备语音数据，以进行播放
+ 135                  1、根据播放列表
+ 136                  2、根据当前播放的那条语音的PCM数据地址、长度  
+ 137          */
+ 138          void Vox_Prepare_PlayCode()
+ 139          {
+ 140   1              unsigned char temp;
+ 141   1      
+ 142   1              if(ulCurrentVox_Len==0) // 当前语音播放完或没有正在播放
+ 143   1              {
+ 144   2                      SPI_Read_End();
+ 145   2                      temp = Vox_PlayList_Get();  // 取得下一条语音的ID
+ 146   2                      if(temp!=INVALID_ID)
+ 147   2                      {
+ 148   3                              Vox_read_inf_to_current(temp);  // 读当前ID对应的语音的起始地址、长度等信息
+ 149   3                      }
+ 150   2              }
+ 151   1              if( ulCurrentVox_Addr   ) // 当前即将播放的语音起始地址有效
+ 152   1              {
+ 153   2                      SPI_Read_Start( ulCurrentVox_Addr ); // 进入当前语音的起始地址
+ 154   2                      ulCurrentVox_Addr = 0;
+ 155   2              }
+ 156   1      
+ 157   1              if( ulCurrentVox_Len ) // 当前有语音正在播放
+ 158   1              {
+ 159   2                      if( PCA_buf_fill_validate() )
+ 160   2                      {
+ 161   3                              temp = SPI_Get_Byte();  // 从FLASH读一个字节
+ 162   3      
+ 163   3                              PCA_buf_fill_code( temp ); // 填入PCA缓冲
+ 164   3                              ulCurrentVox_Len--;      // 减1，直到0
+ 165   3                      }
+ 166   2              }
+ 167   1              
+ 168   1      }
+ 169          /*
+ 170            解除当前的播放
+ 171          */
+ 172          void Vox_Dismiss_Play()
+ 173          {
+ 174   1              VoxListGetPtr = VoxListPutPtr = 0 ; // 列表复位
+ 175   1      
+ 176   1      //      ulCurrentVox_Addr = ulCurrentVox_Len = 0 ; // 当前的清零
+ 177   1      }
+ 178          
+C51 COMPILER V8.18   SPEAKVOX                                                              10/24/2013 12:06:08 PAGE 4   
+
+ 179          /* 
+ 180            等待全部播放完毕，包括列表取完、当前长度播放完
+ 181          */
+ 182          void Vox_Wait_AllPlayDone()
+ 183          {
+ 184   1              while( !Vox_PlayList_Empty() || !Vox_CurrPlaying_Done() )
+ 185   1              {
+ 186   2                      Vox_Prepare_PlayCode(); 
+ 187   2              }
+ 188   1                      SPI_Read_End();
+ 189   1      }
+ 190          
+ 191          /*****************************************************************************/
+ 192          // 测试播放声音
+ 193          /*****************************************************************************/
+ 194          
+ 195          
+ 196          // 测试所有语音ID
+ 197          void Test_All_Vox_ID()
+ 198          {
+ 199   1                      unsigned char i= ID_NUM_0;
+ 200   1                      // 填写所有ID
+ 201   1                      while(1)
+ 202   1                      {
+ 203   2                              if(i<=MAX_VOX_ID) Vox_PlayList_Add(i++);
+ 204   2                              if(i<=MAX_VOX_ID) Vox_PlayList_Add(i++);
+ 205   2                              if(i<=MAX_VOX_ID) Vox_PlayList_Add(i++);
+ 206   2                              if(i<=MAX_VOX_ID) Vox_PlayList_Add(i++);
+ 207   2      
+ 208   2                              while( !Vox_PlayList_Empty() ) 
+ 209   2                              {
+ 210   3                                      Vox_Prepare_PlayCode();
+ 211   3                              }
+ 212   2      
+ 213   2                              if(i > MAX_VOX_ID) break;
+ 214   2                      }
+ 215   1                      // 等待全部播放完毕
+ 216   1                      Vox_Wait_AllPlayDone();
+ 217   1       }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    547    ----
+   CONSTANT SIZE    =    150    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      4       4
+   IDATA SIZE       =     36    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

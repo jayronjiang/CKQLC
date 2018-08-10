@@ -1,0 +1,538 @@
+C51 COMPILER V8.18   ATE_SHELL                                                             10/24/2013 12:06:11 PAGE 1   
+
+
+C51 COMPILER V8.18, COMPILATION OF MODULE ATE_SHELL
+OBJECT MODULE PLACED IN .\output\ATE_Shell.obj
+COMPILER INVOKED BY: E:\Keil\C51\BIN\C51.EXE sourcecode\ATE_Shell.C BROWSE DEBUG OBJECTEXTEND PRINT(.\list\ATE_Shell.lst
+                    -) OBJECT(.\output\ATE_Shell.obj)
+
+line level    source
+
+   1          
+   2          
+   3          #include <REG52.H>
+   4          
+   5          #include "stc12l5612.h"
+   6          #include "delay.h"
+   7          
+   8          #include "w25x.h"
+   9          #include "PCA.H"
+  10          #include "SpeakVox.h"
+  11          
+  12          #include "ATE_Shell.h"
+  13          
+  14          ////////////////////////////////////////////////////
+  15          
+  16          extern unsigned char code VERSION_NO[];
+  17          
+  18          /* 用于xmodem的回调 引用*/
+  19          
+  20          unsigned char *xmodem_buff; 
+  21          unsigned char xm_flush_rx_record(unsigned char len);
+  22          unsigned char xm_load_tx_record(  );
+  23          
+  24          /**/
+  25          #define XMODEM_XMIT_SIZE 128
+  26          
+  27          extern unsigned char xmodemReceive();
+  28          extern unsigned char xmodemTransmit();
+  29          
+  30          //////////////////////////////////////////////////
+  31          /*Flash 缓冲引用*/
+  32          extern uchar xdata FLASH_ext_bufx[];
+  33          
+  34          ////////////////////////////////////////////////////
+  35          
+  36          unsigned long FLASH_addr;
+  37          
+  38          unsigned char cmd_char[6] = "";
+  39          
+  40          // function-prototype
+  41          void ATE_Flash_ListStatus();
+  42          void ATE_Flash_EraseBlock();
+  43          void ATE_Flash_EraseChip();
+  44          void ATE_Flash_WriteDown();
+  45          void ATE_Flash_ReadUp();
+  46          void ATE_Flash_VoxInfoHead();
+  47          void ATE_Play_Sound();  
+  48          
+  49          ///////////////////////////////////////////////////////////////////////////////
+  50          
+  51          #define BAUDRELOAD 0xfA             //波特率采用1T--115200bps   12T--9600bps
+  52          
+  53          ///////////////////////////////////////////////////////////////////////////////
+  54          
+C51 COMPILER V8.18   ATE_SHELL                                                             10/24/2013 12:06:11 PAGE 2   
+
+  55          void ATE_init()
+  56          {
+  57   1              SCON  = 0x50;             /* 0101 0000, mode 1: 8-bit、no parity UART, enable receiver*/ 
+  58   1      /*      PCON |= 0x80; */                   /* double baud-rate */ 
+  59   1      
+  60   1              TMOD |= 0x20;            /* timer 1 mode 2: 8-Bit reload */ 
+  61   1          TH1 = 0xfA;  
+  62   1          TL1 = 0xfA;
+  63   1               
+  64   1              AUXR|=0x40;             /*T1x12=1,timer 1 at 1T ----115200BPS */  
+  65   1      /*      AUXR&=~0x40;*/                  /*12T----9600BPS  */ 
+  66   1      
+  67   1              ET1     = 0;                    /* timer 1 interrupt disable */  
+  68   1          TR1 = 1;  
+  69   1      
+  70   1              ES= 0;               /* disable serial port interrupt */ 
+  71   1      }
+  72          
+  73          ////////////////////////////////////////////////////////////////////////////////
+  74          
+  75          #define UL_LOOP_MS (TIME_SPLIT_1MS)/6
+  76          
+  77          // 从串口接收一个字符    
+  78          void serial_get_char(unsigned char tns)
+  79          {   
+  80   1          unsigned long ulTmo;
+  81   1              
+  82   1              RI=0;
+  83   1          while(tns--)   
+  84   1          {   
+  85   2              for (ulTmo=0; ulTmo<1000*UL_LOOP_MS; ulTmo++)   
+  86   2              {   
+  87   3                  if (RI)
+  88   3                              {
+  89   4                                      cmd_char[0] = SBUF;   
+  90   4                              RI=0;
+  91   4                                      return;
+  92   4                              }   
+  93   3              }   
+  94   2          }
+  95   1              cmd_char[0] = 0x00;   
+  96   1      }
+  97          // 从串口接收以回车（0x0D）为结束符的命令字符
+  98          void serial_get_cmd(unsigned char tns)
+  99          {   
+ 100   1          unsigned long ulTmo;
+ 101   1              unsigned char i = 0;
+ 102   1              
+ 103   1              RI=0;
+ 104   1          while(tns--)   
+ 105   1          {   
+ 106   2              for (ulTmo=0; ulTmo<1000*UL_LOOP_MS; ulTmo++)   
+ 107   2              {   
+ 108   3                  if (RI)
+ 109   3                              {
+ 110   4                                      cmd_char[i] = SBUF;   
+ 111   4                              RI=0;
+ 112   4                                      if( cmd_char[i] == '\r' || i==(sizeof(cmd_char)-1) )
+ 113   4                                      {
+ 114   5                                               cmd_char[i] = 0 ;
+ 115   5                                               return;
+ 116   5                                      }
+C51 COMPILER V8.18   ATE_SHELL                                                             10/24/2013 12:06:11 PAGE 3   
+
+ 117   4                                      i++;
+ 118   4                              }   
+ 119   3              }   
+ 120   2          }
+ 121   1              cmd_char[0] = 0x00;   
+ 122   1      }
+ 123             
+ 124          // 向串口发送字符串 
+ 125          #define UART_TX_CH(c) TI=0;SBUF=c;while(!TI);TI=0
+ 126          
+ 127          void serial_put_chars(unsigned char *cstr)   
+ 128          {   
+ 129   1              unsigned ch;
+ 130   1      
+ 131   1              ch = *cstr ;
+ 132   1              while(ch)
+ 133   1              {
+ 134   2                      UART_TX_CH(ch);
+ 135   2                      
+ 136   2                      cstr++;
+ 137   2                      ch = *cstr ;
+ 138   2              } 
+ 139   1      }
+ 140          
+ 141          void serial_printf_digit (const char *fmtstr, unsigned long num )
+ 142          {
+ 143   1              unsigned char c;
+ 144   1      
+ 145   1              unsigned long carry;
+ 146   1              unsigned char start;
+ 147   1      
+ 148   1              c=*fmtstr;
+ 149   1              while( c )
+ 150   1              {
+ 151   2                      if(c=='%')
+ 152   2                      {
+ 153   3                              c = *(fmtstr+1);
+ 154   3                              if(c=='d') goto PRINT_DECIMAL;
+ 155   3                              if(c=='x'||c=='X')goto PRINT_HEX;
+ 156   3                              c=*fmtstr;
+ 157   3                      }
+ 158   2                      UART_TX_CH( c );
+ 159   2      NEXT_CHAR:
+ 160   2                      fmtstr++;
+ 161   2                      c=*fmtstr;
+ 162   2              }
+ 163   1              return;
+ 164   1      
+ 165   1      // 十进制输出
+ 166   1      PRINT_DECIMAL:
+ 167   1              carry=1000000;
+ 168   1              start=0;
+ 169   1              
+ 170   1              if(num==0) { 
+ 171   2                      UART_TX_CH(0x30); }
+ 172   1              else
+ 173   1                      while(carry)
+ 174   1                      {
+ 175   2                              c = num/carry;
+ 176   2                              if(start || c ) 
+ 177   2                              {
+ 178   3                                      start = 1;
+C51 COMPILER V8.18   ATE_SHELL                                                             10/24/2013 12:06:11 PAGE 4   
+
+ 179   3                                      UART_TX_CH(0x30+c);
+ 180   3                                      num %= carry;
+ 181   3                              }
+ 182   2                              carry /= 10;
+ 183   2                      }
+ 184   1      
+ 185   1              fmtstr++;
+ 186   1              goto NEXT_CHAR;
+ 187   1      
+ 188   1      // 16进制输出
+ 189   1      PRINT_HEX:
+ 190   1              #define H2C(x) ((x<0xa)? (0x30+x) : (0x41-0xa+x))
+ 191   1      
+ 192   1              c = (num>>4*7)&0xf;  UART_TX_CH(H2C(c));
+ 193   1              c = (num>>4*6)&0xf;  UART_TX_CH(H2C(c));
+ 194   1              c = (num>>4*5)&0xf;  UART_TX_CH(H2C(c));
+ 195   1              c = (num>>4*4)&0xf;  UART_TX_CH(H2C(c));
+ 196   1              c = (num>>4*3)&0xf;  UART_TX_CH(H2C(c));
+ 197   1              c = (num>>4*2)&0xf;  UART_TX_CH(H2C(c));
+ 198   1              c = (num>>4*1)&0xf;  UART_TX_CH(H2C(c));
+ 199   1              c = (num>>4*0)&0xf;  UART_TX_CH(H2C(c));
+ 200   1      
+ 201   1              fmtstr++;
+ 202   1              goto NEXT_CHAR;
+ 203   1      }
+ 204             
+ 205             
+ 206          ///////////////////////////////////////////////////////////////////////////////
+ 207          
+ 208          // ATE - Asynchronous Terminal Emulation
+ 209          void ATE_main()
+ 210          {
+ 211   1              serial_put_chars("For enter ATE, Type 'c' and 'enter'.\n");
+ 212   1              serial_put_chars("Download data to flash, Type 't' and 'enter'.\n");
+ 213   1              serial_put_chars("(Please input command in 5s).\n");
+ 214   1      
+ 215   1              serial_get_cmd( 2 );
+ 216   1              if((cmd_char[0]!='c')&&(cmd_char[0]!='t'))
+ 217   1              {
+ 218   2                      serial_put_chars("Good Bye!\r\n");
+ 219   2                      return;
+ 220   2              }
+ 221   1              else if(cmd_char[0]=='t')
+ 222   1              {
+ 223   2                      ATE_Flash_WriteDown();
+ 224   2                      return;
+ 225   2              }
+ 226   1      
+ 227   1      
+ 228   1      ATE_MENU:
+ 229   1              serial_put_chars("\n");
+ 230   1              serial_put_chars("***************************************\n");
+ 231   1              serial_put_chars("*  l --list SPI flash status          *\n");
+ 232   1              serial_put_chars("*  b --erase SPI flash blocks         *\n");
+ 233   1              serial_put_chars("*  c --erase SPI flash chip           *\n");
+ 234   1              serial_put_chars("*  r --readup from SPI flash memory   *\n");
+ 235   1              serial_put_chars("*  w --download data to SPI flash     *\n");
+ 236   1              serial_put_chars("*  h --show vox.inf in SPI flash      *\n");
+ 237   1              serial_put_chars("*  p --play sound                     *\n");
+ 238   1              serial_put_chars("*  v --version info                   *\n");
+ 239   1              serial_put_chars("*  q --quit                           *\n");
+ 240   1              serial_put_chars("***************************************\n");
+C51 COMPILER V8.18   ATE_SHELL                                                             10/24/2013 12:06:11 PAGE 5   
+
+ 241   1      
+ 242   1              for(;;)
+ 243   1              {
+ 244   2                      serial_get_char( 1 );
+ 245   2                      switch( cmd_char[0] )
+ 246   2                      {
+ 247   3                      case 'l':               // --list SPI flash status 
+ 248   3                              ATE_Flash_ListStatus();  goto ATE_MENU; 
+ 249   3                              break;  
+ 250   3                      case 'b':               // --erase SPI flash blocks 
+ 251   3                               ATE_Flash_EraseBlock(); goto ATE_MENU; 
+ 252   3                               break;       
+ 253   3                      case 'c':               // --erase SPI flash chip 
+ 254   3                              ATE_Flash_EraseChip(); goto ATE_MENU; 
+ 255   3                              break;         
+ 256   3                      case 'r':               // --readup from SPI flash memory   
+ 257   3                              ATE_Flash_ReadUp(); goto ATE_MENU; 
+ 258   3                              break;
+ 259   3                      case 'w':               // --download to SPI flash 
+ 260   3                              ATE_Flash_WriteDown(); goto ATE_MENU; 
+ 261   3                              break;
+ 262   3                      case 'h':               // - 语音信息头
+ 263   3                              ATE_Flash_VoxInfoHead(); goto ATE_MENU;
+ 264   3                              break;        
+ 265   3                      case 'p':       // --play sound    
+ 266   3                              ATE_Play_Sound(); goto ATE_MENU; 
+ 267   3                              break;
+ 268   3                      case 'v':       // --version    
+ 269   3                              serial_put_chars("\n");serial_put_chars(VERSION_NO); goto ATE_MENU;
+ 270   3                              break;                  
+ 271   3                      case 'q':// --quit
+ 272   3                              serial_put_chars("Good Bye!\r\n");
+ 273   3                              return; 
+ 274   3                      default:
+ 275   3                              break;                         
+ 276   3                      }
+ 277   2              }
+ 278   1      } 
+ 279          
+ 280          ////////////////////////////////////////////////////////////////////////////
+ 281          
+ 282          void ATE_Flash_ListStatus()
+ 283          {
+ 284   1              serial_printf_digit("RDSR: %x\n", SPI_Read_StatusReg() );
+ 285   1      
+ 286   1              serial_printf_digit("ID1:  %x\n", SPI_Read_ID1() );  
+ 287   1      
+ 288   1              serial_printf_digit("ID2-0:%x  ", SPI_Read_ID2(0) );
+ 289   1              serial_printf_digit("ID2-1:%x\n", SPI_Read_ID2(1) );
+ 290   1               
+ 291   1              serial_printf_digit("ID3:  %x\n", SPI_Read_ID3() );  
+ 292   1      }
+ 293          
+ 294          void ATE_Flash_EraseBlock()
+ 295          {
+ 296   1              unsigned char i;
+ 297   1      
+ 298   1              serial_put_chars("Erase Flash Block ......\n");
+ 299   1      
+ 300   1              FLASH_addr=0;
+ 301   1              for(i=0;i<32;i++)         // Unlock & sec
+ 302   1              {
+C51 COMPILER V8.18   ATE_SHELL                                                             10/24/2013 12:06:11 PAGE 6   
+
+ 303   2                      serial_put_chars("Erase...");
+ 304   2                      serial_printf_digit(" block=%d", i);
+ 305   2                      serial_printf_digit(" FLASH_addr=%x\n", FLASH_addr ); 
+ 306   2                      
+ 307   2                      serial_printf_digit("RDLR: %x\n", SPI_M25PE_RDLR(FLASH_addr) );
+ 308   2      
+ 309   2                      SPI_Erase_Block(FLASH_addr);
+ 310   2                      SPI_Wait_Busy();
+ 311   2      
+ 312   2                      FLASH_addr+=0x10000;
+ 313   2              } 
+ 314   1              serial_put_chars("Erase Flash Block ......OK!\n");
+ 315   1      }
+ 316          
+ 317          void ATE_Flash_EraseChip()
+ 318          {
+ 319   1              serial_put_chars("Erase Flash Chip ......\n");
+ 320   1      
+ 321   1              serial_printf_digit("RDSR : %x\n", SPI_Read_StatusReg() );
+ 322   1      
+ 323   1              SPI_Erase_Chip();
+ 324   1              serial_put_chars("Erase Flash Chip ......OK!\n");
+ 325   1      }
+ 326          
+ 327          ///////////////////////////////////      /////////////////////
+ 328          
+ 329          /* 用于xmodem的回调函数*/
+ 330          //接收
+ 331          unsigned char xm_flush_rx_record(unsigned char len)
+ 332          {
+ 333   1      //      SPI_Write_Page(FLASH_addr);   // 写入flash
+ 334   1              SPI_Write_nBytes((FLASH_addr), len);
+ 335   1              FLASH_addr += len;
+ 336   1      
+ 337   1              return 0;
+ 338   1      }
+ 339          void ATE_Flash_WriteDown()                       //先擦除，再写入
+ 340          {
+ 341   1              unsigned char c;
+ 342   1              serial_put_chars("\nPlease select file and wait...\n");
+ 343   1              
+ 344   1              SPI_Erase_Chip();
+ 345   1      
+ 346   1              serial_put_chars("Click send button to write flash.\n");
+ 347   1      
+ 348   1              xmodem_buff = FLASH_ext_bufx; 
+ 349   1      //      xm_flush_rx_record = cb_xm_flush_rx_record;
+ 350   1      
+ 351   1              FLASH_addr = 0;
+ 352   1              c = xmodemReceive();
+ 353   1      
+ 354   1              SleepMs(250);
+ 355   1              if( c == 0)
+ 356   1                      serial_put_chars("Flash Write Down ...Ok\n");
+ 357   1              else
+ 358   1                      serial_put_chars("Flash Write Down ...Error\n");
+ 359   1      
+ 360   1              serial_printf_digit("Error Code = %d\n", c);
+ 361   1      
+ 362   1      }
+ 363          
+ 364          /* 用于xmodem的回调函数*/
+C51 COMPILER V8.18   ATE_SHELL                                                             10/24/2013 12:06:11 PAGE 7   
+
+ 365          // 发送
+ 366          unsigned char xm_load_tx_record( )
+ 367          {
+ 368   1      //      if( FLASH_addr<1024*200 )  // 这句这样写不行？！
+ 369   1              if( FLASH_addr/1024<200 ) // 传200k
+ 370   1              {
+ 371   2                      SPI_Read_nBytes(FLASH_addr, XMODEM_XMIT_SIZE);
+ 372   2                      FLASH_addr += XMODEM_XMIT_SIZE;
+ 373   2      
+ 374   2                      return XMODEM_XMIT_SIZE;
+ 375   2              }
+ 376   1      
+ 377   1              return 0;
+ 378   1      }
+ 379          void ATE_Flash_ReadUp()
+ 380          {
+ 381   1              unsigned char c;
+ 382   1      
+ 383   1              xmodem_buff = FLASH_ext_bufx; 
+ 384   1      //      xm_load_tx_record = cb_xm_load_tx_record;
+ 385   1      
+ 386   1              serial_put_chars("Flash read up ...\n");
+ 387   1      
+ 388   1              FLASH_addr = 0;
+ 389   1              c = xmodemTransmit();
+ 390   1      
+ 391   1              SleepMs(250);
+ 392   1              if( c == 0)
+ 393   1                      serial_put_chars("Flash read up ...Ok\n");
+ 394   1              else
+ 395   1                      serial_put_chars("Flash read up ...Error\n");
+ 396   1      
+ 397   1              serial_printf_digit("Error Code = %d\n", c);
+ 398   1      
+ 399   1      }
+ 400           
+ 401           ////
+ 402          void ATE_Flash_VoxInfoHead()
+ 403          {  
+ 404   1              #define HEX(x) ((x<0xa)? (0x30+x) : (0x41-0xa+x))
+ 405   1              
+ 406   1              unsigned char i;
+ 407   1              unsigned char j;
+ 408   1              unsigned short a;
+ 409   1              unsigned char c;
+ 410   1      
+ 411   1              FLASH_addr = 0;
+ 412   1      
+ 413   1              for(j=0; j<3; j++)       // total read=J*128
+ 414   1              {
+ 415   2                      SPI_Read_Start(FLASH_addr);
+ 416   2                      for(i=0; i<128; i++)
+ 417   2                              FLASH_ext_bufx[i] = SPI_Get_Byte();
+ 418   2                      SPI_Read_End(); 
+ 419   2                      FLASH_addr += 128;
+ 420   2              
+ 421   2                      for(i=0; i<128; i++)
+ 422   2                      {
+ 423   3                              if(i%16==0) 
+ 424   3                              {
+ 425   4                                      UART_TX_CH('\n');
+ 426   4                                       
+C51 COMPILER V8.18   ATE_SHELL                                                             10/24/2013 12:06:11 PAGE 8   
+
+ 427   4                                      a=j*128+i;
+ 428   4                                      c = (a>>4*3)&0xf;  UART_TX_CH( HEX(c) );
+ 429   4                                      c = (a>>4*2)&0xf;  UART_TX_CH( HEX(c) );
+ 430   4                                      c = (a>>4*1)&0xf;  UART_TX_CH( HEX(c) );
+ 431   4                                      c = (a>>4*0)&0xf;  UART_TX_CH( HEX(c) ); 
+ 432   4      
+ 433   4                                      UART_TX_CH(':'); UART_TX_CH(' ');
+ 434   4                              }
+ 435   3                              a=FLASH_ext_bufx[i];
+ 436   3                              c = (a>>4*1)&0xf;  UART_TX_CH( HEX(c) );
+ 437   3                              c = (a>>4*0)&0xf;  UART_TX_CH( HEX(c) );
+ 438   3                              UART_TX_CH(' ');
+ 439   3                      }
+ 440   2              }
+ 441   1      }
+ 442           
+ 443          ///////////////////////////////////      /////////////////////
+ 444          
+ 445          void ATE_Play_Sound()
+ 446          {
+ 447   1              unsigned char num, i;
+ 448   1      
+ 449   1      PLAY_MENU:
+ 450   1              serial_put_chars("\n");
+ 451   1              serial_put_chars("***************************************\n");
+ 452   1              serial_put_chars("*  Input Vox-ID(form 0 to MAX_ID),     *\n");
+ 453   1              serial_put_chars("*  Or input A for all of them,         *\n");
+ 454   1              serial_put_chars("*  Or input B to backward,             *\n");
+ 455   1              serial_put_chars("*  And then press 'Enter'.             *\n");
+ 456   1              serial_put_chars("***************************************\n");
+ 457   1      
+ 458   1              for(;;)
+ 459   1              {
+ 460   2                      serial_put_chars(".");
+ 461   2      
+ 462   2                      serial_get_cmd( 0xff );
+ 463   2                      if( cmd_char[0] == 'b' ) {return; }// --back
+ 464   2                      if( cmd_char[0] == 'a' ) {Test_All_Vox_ID(); goto PLAY_MENU;}
+ 465   2      
+ 466   2                      if( cmd_char[0] && cmd_char[0]<='9' )   // -- input a digit
+ 467   2                      {
+ 468   3                              num = 0;
+ 469   3                              i = 0;
+ 470   3                              while(cmd_char[i])      
+ 471   3                              {
+ 472   4                                      num = num*10 + cmd_char[i]-0x30;
+ 473   4                                      i++     ;
+ 474   4                              }
+ 475   3                              serial_printf_digit("Input number is:%d.\n", num);
+ 476   3      
+ 477   3                              if(num>MAX_VOX_ID) 
+ 478   3                              { 
+ 479   4                                      serial_put_chars("Invalid ID.\n");
+ 480   4                                      goto PLAY_MENU; 
+ 481   4                              }
+ 482   3      
+ 483   3                              if(num==0)
+ 484   3                                      PCA_Test_SampleVox();
+ 485   3                              else
+ 486   3                              {
+ 487   4                                      Vox_PlayList_Add( num-1 );
+ 488   4                                      Vox_Wait_AllPlayDone();
+C51 COMPILER V8.18   ATE_SHELL                                                             10/24/2013 12:06:11 PAGE 9   
+
+ 489   4                              }
+ 490   3                              serial_put_chars("Play done.\n");
+ 491   3      
+ 492   3                              goto PLAY_MENU;
+ 493   3                      }  // end if 'cmd_char is digit'
+ 494   2              }
+ 495   1      }
+ 496          
+ 497          ///////////////////////////////////      /////////////////////
+ 498          ///////////////////////////////////      /////////////////////
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   2219    ----
+   CONSTANT SIZE    =   1171    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     13      40
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

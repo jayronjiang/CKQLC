@@ -1,0 +1,42 @@
+C51 COMPILER V8.18   FLASHOP                                                               05/12/2011 14:58:00 PAGE 1   
+
+
+C51 COMPILER V8.18, COMPILATION OF MODULE FLASHOP
+OBJECT MODULE PLACED IN .\output\flashOP.obj
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE sourcecode\flashOP.c BROWSE DEBUG OBJECTEXTEND PRINT(.\list\flashOP.lst) OB
+                    -JECT(.\output\flashOP.obj)
+
+line level    source
+
+   1          //Flash²Ù×÷
+   2          #include <reg52.h>
+   3          #include "flashOP.h"
+   4          #include "delay.h"
+   5          #include "ate_shell.h"
+   6          #include "w25x.h"
+   7          
+   8          bit bdata Enter_NorMode;
+   9          
+  10          void flash_download()
+  11          {
+  12   1              serial_put_chars("Press d and 'enter' in 10s to download voice data");
+*** WARNING C206 IN LINE 12 OF SOURCECODE\FLASHOP.C: 'serial_put_chars': missing function-prototype
+*** ERROR C267 IN LINE 12 OF SOURCECODE\FLASHOP.C: 'serial_put_chars': requires ANSI-style prototype
+  13   1              serial_get_cmd(3);
+  14   1              if(cmd_char[0]='d')              //²ÁÐ´flash
+  15   1              {
+  16   2                      ATE_Flash_EraseChip();
+  17   2                      ATE_Flash_WriteDown();
+  18   2                      cmd_char[0]='0';
+  19   2              }
+  20   1              serial_put_chars("Press q and 'enter' in 10s to enter ATE mode");
+  21   1              serial_get_cmd(3);
+  22   1              if(cmd_char[0]='q')
+  23   1              {
+  24   2                      Enter_NorMode=1;
+  25   2                      cmd_char[0]='0';
+  26   2              }
+  27   1              else  Enter_NorMode=0;
+  28   1      }
+
+C51 COMPILATION COMPLETE.  1 WARNING(S),  1 ERROR(S)

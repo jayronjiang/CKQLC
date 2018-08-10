@@ -1,0 +1,209 @@
+C51 COMPILER V8.18   SPEAKCTL                                                              10/24/2013 12:06:12 PAGE 1   
+
+
+C51 COMPILER V8.18, COMPILATION OF MODULE SPEAKCTL
+OBJECT MODULE PLACED IN .\output\speakctl.obj
+COMPILER INVOKED BY: E:\Keil\C51\BIN\C51.EXE sourcecode\speakctl.c BROWSE DEBUG OBJECTEXTEND PRINT(.\list\speakctl.lst) 
+                    -OBJECT(.\output\speakctl.obj)
+
+line level    source
+
+   1          
+   2          #include<REG52.H> 
+   3          #include <INTRINS.H>    
+   4          #include"speakctl.h"
+   5          #include "uart.h"
+   6          #include "SpeakVox.h"
+   7          
+   8          
+   9          #define IS_ZERO(array) (array[3]==0&&array[2]==0&&array[1]==0&&array[0]==0)
+  10          
+  11          unsigned char data data_CX;                      //存放车型
+  12          unsigned char data data_CN;                      //存放车种
+  13          unsigned char idata Fee[4];                      //金额千位
+  14          unsigned char idata Bal[4];                      //余额千位
+  15          
+  16          bit bdata fThanksSpeaked;                       //收费完成标志
+  17          
+  18          void NumberProcess(unsigned char array[]);
+  19          
+  20          /////////////////////////////////////////////////////////////////////////////////////
+  21          ///串口接收数据处理
+  22          ///当串口接收到的数据格式正确时进入此函数
+  23          ///数据格式: STX CX CN FEE(4) BAL(4) ENTRANCE(6) ETX BCC
+  24          ///                      02    1  2 3456   789 10                         03
+  25          ///参考语音播放协议
+  26          ///////////////////////////////////////////////////
+  27          void Dataprocess(void)
+  28          {
+  29   1      //----将缓存中的数据存入各变量
+  30   1              data_CX = comm_buff[0];
+  31   1              data_CN = comm_buff[1];
+  32   1              Fee[3] = comm_buff[2]&0x0F;         //取金额千位
+  33   1              Fee[2] = comm_buff[3]&0x0F;                       //百位
+  34   1              Fee[1] = comm_buff[4]&0x0F;                       //十位
+  35   1              Fee[0] = comm_buff[5]&0x0F;                       //个位
+  36   1              Bal[3] = comm_buff[6]&0x0F;         //取余额千位
+  37   1              Bal[2] = comm_buff[7]&0x0F;                       //百位
+  38   1              Bal[1] = comm_buff[8]&0x0F;                       //十位
+  39   1              Bal[0] = comm_buff[9]&0x0F;                       //个位
+  40   1              
+  41   1              if(data_CX=='Y')
+  42   1              {
+  43   2                      if(!fThanksSpeaked)
+  44   2                      {
+  45   3                              fThanksSpeaked=1;
+  46   3                              Vox_PlayList_Add(ID_XieXie);            //谢谢
+  47   3                              Vox_PlayList_Add(ID_YLPA);                      //一路平安
+  48   3                      }
+  49   2              }
+  50   1              else 
+  51   1              {       
+  52   2                      fThanksSpeaked=0;
+  53   2                      switch(data_CN)
+  54   2                      {
+C51 COMPILER V8.18   SPEAKCTL                                                              10/24/2013 12:06:12 PAGE 2   
+
+  55   3      //                      case '0':
+  56   3                              //保留
+  57   3      //                      break;
+  58   3                              case '1'://==========================================正常车种
+  59   3                                      if(IS_ZERO(Fee))                                                                //金额为0
+  60   3                                      {
+  61   4                                              Vox_PlayList_Add(ID_TXK);                                       //发“通行卡”
+  62   4                                              Vox_PlayList_Add(ID_XKCG);                                      //发“写卡成功”
+  63   4                                      }
+  64   3                                      else
+  65   3                                      {
+  66   4                                              if(data_CX>='1'&&data_CX<='5')                          //车型范围：1～5
+  67   4                                              {
+  68   5       //                                             Vox_PlayList_Add(ID_Delay);                      
+  69   5                                                      Vox_PlayList_Add(ID_NiHao);                             //你好
+  70   5                                                      Vox_PlayList_Add(data_CX&0x0F);                 //X
+  71   5                                                      Vox_PlayList_Add(ID_XingChe);                   //型车
+  72   5                                                      Vox_PlayList_Add(ID_Qing);                              //请
+  73   5                                                      Vox_PlayList_Add(ID_Jiao);                              //交
+  74   5                                                      NumberProcess(Fee);
+  75   5                                                      Vox_PlayList_Add(ID_Yuan);                              //元
+  76   5                                              }
+  77   4                                      }
+  78   3                                      break;
+  79   3                              case '2':       //=======================================免费车
+  80   3       //                             Vox_PlayList_Add(ID_MFC);                        
+  81   3                                      break;
+  82   3                              case '3':  //========================================预付车
+  83   3                                      Vox_PlayList_Add(ID_YFC);                                               //发“预付车”
+  84   3                                      if(!IS_ZERO(Fee))                                                               //金额不为0时报价
+  85   3                                      {               
+  86   4                                              Vox_PlayList_Add(ID_Qing);                                      //发“请”
+  87   4                                              Vox_PlayList_Add(ID_Jiao);                                      //发“交”
+  88   4                                              NumberProcess(Fee);
+  89   4                                              Vox_PlayList_Add(ID_Yuan);                                      //元
+  90   4                                      }
+  91   3                                      Vox_PlayList_Add(ID_YuE);                                               //发“余额”
+  92   3                                      if(IS_ZERO(Bal))                                                                //余额为0
+  93   3                                      {
+  94   4                                              Vox_PlayList_Add(ID_NUM_0);
+  95   4                                      }                                                                                               //报零，跳过“元”
+  96   3                                      else                                                                                    //余额不为0时报数额
+  97   3                                      {       
+  98   4                                              NumberProcess(Bal);
+  99   4                                              Vox_PlayList_Add(ID_Yuan);                                      //元
+ 100   4                                      }                               
+ 101   3                                      break;  
+ 102   3                              case '4': //=========================================公务车
+ 103   3      //                              Vox_PlayList_Add(ID_GWC);                        
+ 104   3                                      break;
+ 105   3                              case '5': //=========================================军警车
+ 106   3                                      Vox_PlayList_Add(ID_JJC);                        
+ 107   3                                      break;
+ 108   3                              case '6': //=========================================未付车
+ 109   3                                      Vox_PlayList_Add(ID_WFC);                        
+ 110   3                                      break;
+ 111   3                              case '7': //=========================================粤通卡写卡成功
+ 112   3       //                             Vox_PlayList_Add(ID_Delay);                      
+ 113   3                                      Vox_PlayList_Add(ID_YTK);                        
+ 114   3                                      Vox_PlayList_Add(ID_XKCG);                       
+ 115   3                                      break;
+ 116   3                              case '8': //=========================================欢迎光临，请按绿色键取卡
+C51 COMPILER V8.18   SPEAKCTL                                                              10/24/2013 12:06:12 PAGE 3   
+
+ 117   3                                      Vox_PlayList_Add(ID_HYGL);                       
+ 118   3                                      Vox_PlayList_Add(ID_QingAn);
+ 119   3                                      Vox_PlayList_Add(ID_LSJ);
+ 120   3                                      Vox_PlayList_Add(ID_QuKa);                       
+ 121   3                                      break;
+ 122   3                              case 'A': //=========================================请取通行卡
+ 123   3                                      Vox_PlayList_Add(ID_QingQu);
+ 124   3                                      Vox_PlayList_Add(ID_TXK);                        
+ 125   3                                      break;
+ 126   3                              case 'M': //=========================================粤通卡标识成功
+ 127   3                                      Vox_PlayList_Add(ID_YTK);                        
+ 128   3                                      Vox_PlayList_Add(ID_BSCG);                       
+ 129   3                                      break;
+ 130   3                              case 'N': //=========================================通行卡标识成功
+ 131   3                                      Vox_PlayList_Add(ID_TXK);                        
+ 132   3                                      Vox_PlayList_Add(ID_BSCG);                       
+ 133   3                                      break;
+ 134   3                              case 'O': //=========================================标识成功
+ 135   3                                      Vox_PlayList_Add(ID_BSCG);                       
+ 136   3                                      break;
+ 137   3                              default:
+ 138   3                                      break;
+ 139   3                      }
+ 140   2              }
+ 141   1      }
+ 142          
+ 143          //////////////////////////////////////////////////////////////////////////////
+ 144          ///数额处理函数
+ 145          ///
+ 146          ///
+ 147          void NumberProcess(unsigned char array[])
+ 148          {
+ 149   1              bit bdata fNumberSpeak=0;
+ 150   1              if( array[3] != 0 )     //千
+ 151   1              { 
+ 152   2                      fNumberSpeak=1;
+ 153   2                      Vox_PlayList_Add(array[3]);
+ 154   2                      Vox_PlayList_Add(ID_NUM_Qian);  
+ 155   2              }
+ 156   1              if( array[2] != 0 )     //百
+ 157   1              {
+ 158   2                      Vox_PlayList_Add(array[2]);
+ 159   2                      Vox_PlayList_Add(ID_NUM_Bai);      
+ 160   2                      fNumberSpeak=1;
+ 161   2              }
+ 162   1              else if( fNumberSpeak && ( array[1] != 0 ) )
+ 163   1              {
+ 164   2                      Vox_PlayList_Add(0);
+ 165   2              }
+ 166   1              if( array[1] != 0 )     //十
+ 167   1              {       
+ 168   2                      Vox_PlayList_Add(array[1]);
+ 169   2                      Vox_PlayList_Add(ID_NUM_Shi);      
+ 170   2              }
+ 171   1              else if( fNumberSpeak && ( array[0] != 0 ) )
+ 172   1              {
+ 173   2                      Vox_PlayList_Add(0);
+ 174   2              }
+ 175   1              if( array[0] != 0 )
+ 176   1              {
+ 177   2                      Vox_PlayList_Add(array[0]);
+ 178   2              }
+C51 COMPILER V8.18   SPEAKCTL                                                              10/24/2013 12:06:12 PAGE 4   
+
+ 179   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    491    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      2       3
+   IDATA SIZE       =      8    ----
+   BIT SIZE         =      1       1
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
