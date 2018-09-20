@@ -14,6 +14,9 @@
 
 sbit WDT		=P1^4;
 sbit COMMFLASH	=P1^7;	//Communication LED	, H-light, L-unlight
+
+// 3 Vars-assemble blow to select the UART source.
+// e.g. TOVOX = 0, TOFEE=1, TOCPU=0, means select the FEE device to communicate.
 sbit TOVOX	=P1^0;	//Selection of voice
 sbit TOFEE	=P1^1;	//Selection of fee_display
 sbit TOCPU	=P1^3;	//Selection of cmmunication with PC

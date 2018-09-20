@@ -31,7 +31,7 @@ bit bdata buffer_star;
 bit bdata buffer_sto;
 bit bdata message_right;
 bit bdata message_wrong;
-bit bdata dete_change;
+bit bdata dete_change;	// indacate status of P2 changed.
 bit bdata bTTL_ALG_Wrong;
 
 bit bdata bEnBarAutoDown;
@@ -64,7 +64,7 @@ unsigned char data ReceiveTimeoutCount;
 
 unsigned char data WatchingDelayCount=0;
 //-----------------------------------------------------------------------------
-unsigned char bdata control_char1;         //'A' TYPE message
+unsigned char bdata control_char1;         // 	control_char1=COMM_buff[3]; 
 sbit  ALG_up_bit      =control_char1^0; 
 sbit  ALG_down_bit    =control_char1^1;
 sbit  TTL_green_bit   =control_char1^2;
@@ -74,7 +74,7 @@ sbit  Lane_lamp_bit   =control_char1^5;		//CheDao TongXing Lamp
 sbit  control_bak1_bit=control_char1^6;
 sbit  control_bak2_bit=control_char1^7;
 
-unsigned char bdata control_char_bak2;          	//'A' type message
+unsigned char bdata control_char_bak2;          	//'control_char_bak2=COMM_buff[20];
 sbit  ALG_control_mode	=control_char_bak2^0;	//Mode: Auto LG or Manual LG
 sbit  FEE_display_bit 	=control_char_bak2^1;
 sbit  SPEAK_control_bit	=control_char_bak2^2;
@@ -85,7 +85,7 @@ sbit  bControlOption	=control_char_bak2^5;	//车控器使用属性: 1-出口, 0-入口
 sbit  bFeeDispReserved2	=control_char_bak2^6;
 
 //-----------------------------------------------------------------------------
-unsigned char bdata  device_status_char1;       //'B' type message
+unsigned char bdata  device_status_char1;       //device_status_char1 = P2
 sbit  TTL_detect_bit   =device_status_char1^0;
 sbit  LG_detect_bit    =device_status_char1^1;
 sbit  ALarm_detect_bit =device_status_char1^2;
@@ -146,9 +146,10 @@ void main(void)
 {
 	char FlashTimes=3;
 		ddl_200us(200);
+	// Jerry: start sequence, communicaiton LED blinks 3times.
 	do
 	{
-		COMMFLASH=1;
+		COMMFLASH=1;	// Jerry: used to indicate if communication happens.
 		ddl_200us(64);
 		COMMFLASH=0;
 		ddl_200us(64);
@@ -156,6 +157,7 @@ void main(void)
 	}while(FlashTimes>0);
 
 	InitSys();
+	// If it is the first time powering on.
 	if(PowerOnFlag!=(char)0xAA)
 	{
 		PowerOnFlag=(char)0xAA;
@@ -194,12 +196,14 @@ void main(void)
 				message_right=0;
 				FeedDog();
 				if(COMM_buff[2]!='1') continue;	//只有是本机地址才对设备进行控制
-				if((COMM_buff[1]=='C')&&(COMM_buff[3]=='R')) {while(1);}
+				if((COMM_buff[1]=='C')&&(COMM_buff[3]=='R')) {while(1);} // Reset the system?
 				if((COMM_buff[1]=='C')&&(COMM_buff[3]=='V')) {PrintVerInfo(); continue;}
 				if((COMM_buff[1]=='C')&&(COMM_buff[3]=='D')) {DumpMemory(); continue;}
 				//if(COMM_buff[1]!='A') continue;	//以下只处理B类信息
 
 				detect_ALG_TTL_working();
+
+				// What's these for?
 				send_mess(0x02);
 				send_mess('B');
 				send_mess('1');
@@ -388,6 +392,7 @@ void DumpMemory(void)
 	send_mess(0x0A);
 }
 //==============================================================================================
+// System configures, enable the interrupts.
 void InitSys(void)
 {
       SCON=0x40;
@@ -414,6 +419,7 @@ void InitApp(void)
 	char i;    
 
 	FeedDog();
+	// All the devices are Low level to drive.
 	BAR_UP=1;
 	BAR_DOWN=1;
 	TTL_GREEN=1;
@@ -560,6 +566,7 @@ void ddl_200us(int x)
 }
 
 //==============================================================================================
+// 20ms interrupt?
 void timer0_int_entry() interrupt 1 using 1
 {
 	static char DidaCount=0;
@@ -570,6 +577,7 @@ void timer0_int_entry() interrupt 1 using 1
 	WDT=!WDT;
 	bReEntry=1;
 	DidaCount++;			//微调
+	// It runs 200ms after the power on.
 	if(DidaCount<10) {bReEntry=0; return;}
 
 	DidaCount=0;
@@ -635,6 +643,7 @@ void detect_device(void)
 }
 
 //==============================================================================================
+// Detect if the action is done or not.
 bit  detect_ALG_TTL_working(void)
 {
 		FeedDog();
@@ -1057,7 +1066,7 @@ void control_device()
 	FeedDog();
 
 	BAR_DOWN=1;BAR_UP=1;
-//--------栏杆控制---------------------
+//--------栏杆控制,这是哪个栏杆?---------------------
 	//control_char1=COMM_buff[3];
 	if(ALG_down_bit==1)
 	{
@@ -1087,7 +1096,7 @@ void control_device()
 		ALG_down_flag_bit=0;
 	}
 //-------------------------------------
-
+	// Accept the commands from PC, control the devices.
 	if(TTL_green_bit==1)
 			TTL_GREEN=0;
 	else	TTL_GREEN=1;
