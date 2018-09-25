@@ -21,15 +21,16 @@ sbit TOVOX	=P1^0;	//Selection of voice
 sbit TOFEE	=P1^1;	//Selection of fee_display
 sbit TOCPU	=P1^3;	//Selection of cmmunication with PC
 
-sbit BAR_UP	=P0^0;	//8-chanel output-control.(8-chanel input-detect legcy to P2)
-sbit BAR_DOWN	=P0^1;
-sbit TTL_GREEN	=P0^2;
-sbit VOX_ALM	=P0^3;
-sbit LIGHT_ALM	=P0^4;
-sbit LAN_LAMP	=P0^5;
+/*Low level, e.g. if want to up the BAR, set: BAR_UP = 0 */
+sbit BAR_UP	=P0^0;	//8-chanel output-control.(8-chanel input-detect legcy to P2),栏杆起
+sbit BAR_DOWN	=P0^1; 	// 栏杆落
+sbit TTL_GREEN	=P0^2;	// 雨棚灯
+sbit VOX_ALM	=P0^3;	// 声音报警器
+sbit LIGHT_ALM	=P0^4;	// 光报警器
+sbit LAN_LAMP	=P0^5;	// 车道通信灯
 sbit BAK1_USED	=P0^6;
 sbit BAK2_USED	=P0^7;
-sbit pinSwtichALG =P0^6;
+sbit pinSwtichALG =P0^6;  // 选择开关? 0:降杠, 1: 抬杠
 //==========================================================================================
 
 

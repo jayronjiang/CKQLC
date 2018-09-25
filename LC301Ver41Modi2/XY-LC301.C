@@ -27,10 +27,10 @@ char code *CodeMark[]={
     "]"
 };
 //---------------------------------------------------------------------------------------------
-bit bdata buffer_star;
-bit bdata buffer_sto;
-bit bdata message_right;
-bit bdata message_wrong;
+bit bdata buffer_star;	// buffer starts to receive the data
+bit bdata buffer_sto;	// Messages are finished.
+bit bdata message_right;	// Message received is OK.
+bit bdata message_wrong;	// Message received is not OK.
 bit bdata dete_change;	// indacate status of P2 changed.
 bit bdata bTTL_ALG_Wrong;
 
@@ -43,15 +43,15 @@ bit bdata alarm_flag;
 bit bdata TTL_working_wrong;	//TongXing Lamp
 bit bdata ALG_working_wrong;	//Auto-LanGan
 
-bit bdata ALG_up_flag_bit;
-bit bdata ALG_down_flag_bit;
+bit bdata ALG_up_flag_bit;		// 状态指示, 1: 已经抬杠, 0:未抬杠
+bit bdata ALG_down_flag_bit;	// 状态指示, 1: 已经降杠, 0:未降杠
 bit bdata LastLaneLampState;
 bit bdata watching_car_passing;	//用于防砸功能:在车辆从线圈离开、降竿的过程置1，启动防砸监视,栏杆彻底降下或则接收到抬杆命令，置0，停止监视
 
 bit bdata bLastLaneRedGreenOperateState;
 bit bdata bALGTTLAutoDetect;
 bit bdata bFeeCleared;
-bit bdata bTXok;
+bit bdata bTXok;		// Sending is finished OK.
 
 unsigned char data COMM_buff[COMM_LENTH];
 unsigned char data send_addr;
@@ -59,7 +59,7 @@ unsigned char data tmp_use1;
 unsigned char data alarm_time_counter;
 unsigned char data detect_time_counter; 
 
-unsigned char data ReceiveIndicateCount;
+unsigned char data ReceiveIndicateCount; // Used to light off the LED when receiving, ~20ms
 unsigned char data ReceiveTimeoutCount;
 
 unsigned char data WatchingDelayCount=0;
@@ -86,10 +86,10 @@ sbit  bFeeDispReserved2	=control_char_bak2^6;
 
 //-----------------------------------------------------------------------------
 unsigned char bdata  device_status_char1;       //device_status_char1 = P2
-sbit  TTL_detect_bit   =device_status_char1^0;
+sbit  TTL_detect_bit   =device_status_char1^0;  // 雨棚灯状态
 sbit  LG_detect_bit    =device_status_char1^1;
 sbit  ALarm_detect_bit =device_status_char1^2;
-sbit  ALG_detect_bit   =device_status_char1^3;
+sbit  ALG_detect_bit   =device_status_char1^3;  // 栏杆状态, 0:降杠到位 1: 抬杠到位
 sbit  FRONT_coil_bit   =device_status_char1^4;
 sbit  BACK_coil_bit    =device_status_char1^5;
 sbit  bakup_detect1_bit=device_status_char1^6;
@@ -97,11 +97,11 @@ sbit  bakup_detect2_bit=device_status_char1^7;
 
  
 unsigned char bdata device_status_bakused;      //'B' type message 
-sbit  ALG_work_status=device_status_bakused^2;
+sbit  ALG_work_status=device_status_bakused^2;	 // 抬杠过程是否完成?
 sbit  TTL_work_status=device_status_bakused^6;
 
-unsigned char bdata sys_tmep;                 //auto detect system used
-sbit sys_tmep_b7=sys_tmep^7;
+unsigned char bdata sys_tmep;                 //auto detect system used, sys_tmep = P2
+sbit sys_tmep_b7=sys_tmep^7;		     //It is also the low level, if ACTIVE, the signal is LOW.
 sbit sys_tmep_b6=sys_tmep^6;
 sbit sys_tmep_b5=sys_tmep^5;
 sbit sys_tmep_b4=sys_tmep^4;
@@ -158,6 +158,7 @@ void main(void)
 
 	InitSys();
 	// If it is the first time powering on.
+	// 没有什么意义，因为没有写入e2prom
 	if(PowerOnFlag!=(char)0xAA)
 	{
 		PowerOnFlag=(char)0xAA;
@@ -196,6 +197,9 @@ void main(void)
 				message_right=0;
 				FeedDog();
 				if(COMM_buff[2]!='1') continue;	//只有是本机地址才对设备进行控制
+				// 如果是C 类信息, 判断是什么命令
+				// 起始码  + 通信类 + 设备地址 + 调试命令 + 命令参数 + 结束码 + 校验码
+				// R' - 复位， 'V' - 取版本信息，'D' - 将车控器内存信息导出(.bin格式)
 				if((COMM_buff[1]=='C')&&(COMM_buff[3]=='R')) {while(1);} // Reset the system?
 				if((COMM_buff[1]=='C')&&(COMM_buff[3]=='V')) {PrintVerInfo(); continue;}
 				if((COMM_buff[1]=='C')&&(COMM_buff[3]=='D')) {DumpMemory(); continue;}
@@ -203,13 +207,33 @@ void main(void)
 
 				detect_ALG_TTL_working();
 
-				// What's these for?
+				// Message B response
+				// 起始码 + 通信类 + 设备地址 + 设备状态字节1 + 设备状态字节2 + 结束码 + 校验码 (共7个字节)
 				send_mess(0x02);
 				send_mess('B');
 				send_mess('1');
+				// device_status_char1:设备状态字节
+				// 0位: 雨棚灯状态      --0为红灯，1为绿灯
+				// 1位: 封道栏杆状态--0为打开，1为关闭
+				// 2位: 脚踏报警状态--0为有报警，1为无报警
+				// 3位: 自动栏杆状态--0为降杆，1为抬杆
+				// 4位: 前线圈                 --0为有车，1为无车
+				// 5位: 后线圈                 --0为有车，1为无车
+				// 6位: 车道通行灯      --0为红灯，1为绿灯
+				// 7位: 备用                       --0为启动，1为无
 				send_mess(device_status_char1);
+				// device_status_bakused: 其中设备状态字节2:
+				// 0位: 备用
+				// 1位: 备用
+				// 2位: 栏杆       --('0'表示正常, '1'表示出错)
+				// 3位: 备用
+				// 4位: 备用
+				// 5位: 备用
+				// 6位: 顶棚灯 --('0'表示正常, '1'表示出错)
+				// 7位: 备用
 				send_mess(device_status_bakused);
 				send_mess(0x03);
+				// 计算结束码, 是前面字节的依次异或
 				tmp_use1=('B')^('1');
 				tmp_use1=tmp_use1^(device_status_bakused);
 				tmp_use1=tmp_use1^device_status_char1;              
@@ -217,8 +241,28 @@ void main(void)
 
 
 				//外设控制(注意保持在其他控制之前)
+				// Message A receiving
+				// 起始码+通信类+设备地址+控制字节1+金额(4字节)+余额(4字节)+入口站(6字节)
+				// +车型+车种+控制字节2+通讯序号+结束码+校验码 (共24个 字节)
+
+				// 控制字节2:
+				// 0位: 栏杆控制位  --1:车辆过后自动降杆模式，0:车辆过后手动降杆模式
+				// 1位: 费额显示位  --1:费额显示，            0:费额不显示
+				// 2位: 语音报价位  --1:报价，                0:不报价
+				// 3位: 费额显示保持--1:保持，            0:刷新，当为1时，忽略bit1
+				// 4位: 费显选择位  --1:广东版本，无保持功能，0:山西版本有保持功能，本控制需要费显支持
+			       // 5位: 车控器属性  --1:用于出口，            0:用于入口
 				control_char_bak2=COMM_buff[20];
-				control_char1=COMM_buff[3];
+				// 控制字节1:
+				// 0位: 起栏杆--1为抬杆，0为保持
+				// 1位: 落栏杆--1为降杆，0为保持
+				// 2位: 顶棚灯--1为绿灯，0为红灯
+				// 3位: 声报警--1为声报警，0为声报警取消
+				// 4位: 光报警--1为光报警，0为光报警取消
+				// 5位: 通行灯--1为绿灯，0为红灯
+				// 6位: 未定义--备用
+				// 7位: 未定义--备用
+				control_char1=COMM_buff[3];  // 控制字节
 				if(ALG_up_bit)
 				{
 					bEnBarAutoDown=ALG_control_mode;	//自动降杆模式
@@ -251,6 +295,7 @@ void main(void)
 				}
 			}
 
+			// Send to PC 0x15 'E' 'E' 'E' 'E ' 0x03 0x00'
 			if(message_wrong==1)
 			{
 				message_wrong=0;
@@ -285,13 +330,14 @@ void main(void)
 			tmp_use1=tmp_use1^device_status_char1;              
 			send_mess(tmp_use1);
                                      
-			if(BACK_coil_bit==0)	
-				dete_bit_recd=1;	////if car on coil, record set
+			if(BACK_coil_bit==0)	 // 如果有车
+				dete_bit_recd=1;	// if car on coil, record set
 		}
 
 
 		//防止砸车功能，以上注释部分的改进
 		WDT=!WDT;
+		// 降杠过程中发现后线圈有车, 抬杠,并再次进入自动降杠过程
 		if(watching_car_passing){
 		if(BACK_coil_bit==0)	//后线圈有车
 		{
@@ -304,6 +350,7 @@ void main(void)
 			}
 		}}
 
+		// Alarming for 10sec
 		if(ALarm_detect_bit==0)	//valid is 0
 		{
 			alarm_time_counter=ALARM_TIME;
@@ -314,15 +361,16 @@ void main(void)
 
 		//自动降栏杆
 		WDT=!WDT;
-		if(bEnBarAutoDown==1)			
+		if(bEnBarAutoDown==1)		// 自动降杠模式	
 		{
+			// 如果上次有车, 这次无车,表示车已经离开
 			if(BACK_coil_bit==1)		//Back Coil Flag =1, No Car
 			{
 				if(dete_bit_recd==1)	//Car ever on Coil last time, this 2 line indicate Car leave Coil
 				{
 					dete_bit_recd=0;
 					bEnBarAutoDown=0;	//复位为手动降栏杆模式
-					ALG_down_bit=1;
+					ALG_down_bit=1;		// 开启降杠过程
 					ALG_up_bit=0;
 					Lane_lamp_bit=0;	//red
 					control_device();
@@ -332,10 +380,11 @@ void main(void)
 		}
 			
 		WDT=!WDT;
+		// 设备每隔3s自动检测下状态
 		if(bALGTTLAutoDetect)		//设备错误状态自动检测部分
 		{
 			bALGTTLAutoDetect=0;
-    		if(detect_ALG_TTL_working())
+    			if(detect_ALG_TTL_working())
 			{
 				bTTL_ALG_Wrong=1;			//如果是错误状态，每当该标志置位时向上位机汇报
 				dete_change=1;
@@ -355,6 +404,7 @@ void main(void)
 /******************************************************
 XY-LC-301 BASIC INITIALIZATION SECTION
 ******************************************************/
+//复位时，车控器向上位机发版本信息，如：XY-LC-301-V4.1-40618
 void PrintVerInfo(void)
 {
 	char i=0;
@@ -418,6 +468,7 @@ void InitSys(void)
 	/* 设置串口中断为高优先级*/
 	PS=1;
 
+	/*声音报警、费显和上位机通信共用一个串口*/
 	TOVOX=0;
 	TOFEE=0;
 	TOCPU=1;
@@ -484,7 +535,8 @@ void InitApp(void)
 void init_uart1() interrupt 4 using 3
 {
 	static unsigned char data tmp,rec_counter;
-  
+
+  	// Receiving is finished.
 	if(RI)
 	{
 		RI=0;
@@ -494,9 +546,9 @@ void init_uart1() interrupt 4 using 3
 		{
 			rec_counter=0;
 			COMM_buff[rec_counter]=tmp; 
-			buffer_star=1;
+			buffer_star=1;	// The first byte.
 			rec_counter++;
-			COMMFLASH=1;
+			COMMFLASH=1; // When receiving, flash the led.
 			ReceiveIndicateCount=1;	//CommLedFlash Delay Count
 			ReceiveTimeoutCount=RECEIVE_TIMEOUT; 
 		}                      
@@ -523,13 +575,15 @@ void init_uart1() interrupt 4 using 3
 	}
 	else
 	{
+		// If not the RX INT, it is the TX INT
 		TI=0;
-		bTXok=1;
+		bTXok=1;  // Sending is OK.
 	}
 }
 //==============================================================================================
 //Common.c
 //==============================================================================================
+// Calculate the BCC and compare them if it is OK.
 void judge_rec_message()
 {
 	unsigned char i,j;
@@ -550,6 +604,7 @@ void judge_rec_message()
 	}
 }
 //==============================================================================================
+// Send 1 single byte process
 void send_mess(unsigned char n)
 {
 	unsigned int addtmp=1000;
@@ -634,18 +689,21 @@ void timer0_int_entry() interrupt 1 using 1
 
 	DidaCount=0;
 
-	//codes below execute every 200ms
+	//codes below execute every 200ms!!!!
+	// 降杠时监控时间, 超过此时间则不监视后线圈
 	if(WatchingDelayCount>0)
 	{
 		WatchingDelayCount--;
 		if(WatchingDelayCount==0) watching_car_passing=0;
 	}
+	// 接收时闪灯间隔
 	if(ReceiveIndicateCount>0)
 	{
 		ReceiveIndicateCount--;
 		if(ReceiveIndicateCount==0)	COMMFLASH=0;	//Close LED
 	}
 
+	// 接收超时, 数据帧断续
 	if(ReceiveTimeoutCount>0)
 	{
 		ReceiveTimeoutCount--;
@@ -653,7 +711,7 @@ void timer0_int_entry() interrupt 1 using 1
 		 	{buffer_star=0; buffer_sto=0;}	//接收超过时间复位
 	}
 
-
+	// 系统检测状态和控制位是否一致,每3s检测一次
 	if(detect_time_counter>0)
 		detect_time_counter--;
 	else
@@ -661,6 +719,8 @@ void timer0_int_entry() interrupt 1 using 1
 		bALGTTLAutoDetect=1;
 		detect_time_counter=AUTO_DETCET_TIME;
 	}
+
+	// 报警长度,10S
 	if(alarm_time_counter>0)
 	{
 		alarm_time_counter--;
@@ -685,7 +745,7 @@ void detect_device(void)
 		outside_tmp1=outside_tmp;
 		ddl_200us(60);	//80-40ms ;//40-20ms ;//60-30ms ;//20-10ms ;//100-50ms
 		outside_tmp=P2;
-		if(outside_tmp==outside_tmp1)
+		if(outside_tmp==outside_tmp1)	// 30ms防抖结果
 		{
 			dete_change=1;
 			device_status_char1=outside_tmp;
@@ -727,13 +787,29 @@ bit  detect_ALG_TTL_working(void)
 
 }
 //==============================================================================================
-// Test all extern device if work normal
+/********************************************************************************************************
+** 函数名称: system_auto_detect
+** 功能描述: Test all extern device if work normal
+** 输 　 入: First output a ACTIVE signal, wait 1or 2 sec, read the feedback
+**			:	Then output a INACTIVE signal, wait 1or 2 sec, read the feedback again.
+** 输　  出:
+**
+** 全局变量:
+** 调用模块:
+**
+** 作　  者: Jerry
+** 日　  期: 20180925
+**------------------------------------------------------------------------------------------------------
+** 修 改 人:
+** 日　  期:
+**------------------------------------------------------------------------------------------------------
+*******************************************************************************************************/
 void system_auto_detect()
 {
 	//  unsigned char i,j;
 	FeedDog();
 
-	BAK2_USED=0;
+	BAK2_USED=0;	// Output a signal.
 	COMMFLASH=1;
 	ddl_200us(505);WDT=0;WDT=1;
 	ddl_200us(505);WDT=0;WDT=1;
@@ -742,7 +818,7 @@ void system_auto_detect()
 	ddl_200us(505);WDT=0;WDT=1;
 	sys_tmep=P2;				//(8-chanel input-detect legcy to P2)
 
-	if(sys_tmep_b7==0)
+	if(sys_tmep_b7==0)	// Read the feedback
 	{
 		BAK2_USED=1;
 		ddl_200us(505);WDT=0;WDT=1;
@@ -763,6 +839,8 @@ void system_auto_detect()
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
+
+		// BAK1_USED signal testing begins.
 		COMMFLASH=1;
 		BAK1_USED=0;
 		ddl_200us(505);WDT=0;WDT=1;
@@ -785,10 +863,11 @@ void system_auto_detect()
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
 
+		// LAN_LAMP signal testing begins.
 		COMMFLASH=1;				//start test lamp
 		LAN_LAMP=0;				//Open Lamp
 		ddl_200us(505);WDT=0;WDT=1;
-		ddl_200us(505);WDT=0;WDT=1;	//delay
+		ddl_200us(505);WDT=0;WDT=1;	//delay ~0.75s total
 		ddl_200us(505);WDT=0;WDT=1;
 
 		sys_tmep=P2;				//read status
@@ -813,6 +892,8 @@ void system_auto_detect()
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
 		COMMFLASH=1;
+
+		// LIGHT_ALM signal testing begins.
 		LIGHT_ALM=0;
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
@@ -839,6 +920,7 @@ void system_auto_detect()
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
 
+		// VOX_ALM signal testing begins.
 		COMMFLASH=1;
 		VOX_ALM=0;
 		ddl_200us(505);WDT=0;WDT=1;
@@ -865,6 +947,8 @@ void system_auto_detect()
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
+
+		// TTL_GREEN signal testing begins.
 		COMMFLASH=1;
 		TTL_GREEN=0;
 		ddl_200us(505);WDT=0;WDT=1;
@@ -893,6 +977,8 @@ void system_auto_detect()
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
+
+		// BAR_DOWN signal testing begins.
 		COMMFLASH=1;
 		BAR_DOWN=0;
 		ddl_200us(505);WDT=0;WDT=1;
@@ -919,6 +1005,8 @@ void system_auto_detect()
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
+
+		// BAR_UP signal testing begins.
 		COMMFLASH=1;
 		BAR_UP=0;
 		ddl_200us(505);WDT=0;WDT=1;
@@ -943,9 +1031,11 @@ void system_auto_detect()
 		}
                         
 		TOVOX=1;TOFEE=1;TOCPU=0;
-		//j=COMM_buff[4];
-		//for(i=5;i<=19;i++)
-		//	j=j^COMM_buff[i]; //bcc
+		//数据信息：02 +CheXing +CheZhong +Fee +Balance +EntranceName +03 +BCC
+		//费显显示如上信息，对于语音报价器，则播放相应语音
+		//CheZhong==0x37时，发'粤通卡写卡成功'
+		//CheZhong==0x38时，发'欢迎光临'
+		//CheZhong==0x31，并且Fee==0x30,0x30,0x30,0x30时，发'通行卡写卡成功'
 		send_mess(0x02);
 		send_mess('3'); //chexing
 		send_mess('3'); //chezhong
@@ -1023,7 +1113,10 @@ void system_auto_detect()
 		ddl_200us(505);WDT=0;WDT=1;
 		ddl_200us(505);WDT=0;WDT=1;
 		COMMFLASH=0;
-                                          
+
+		// 控制信息:02 +CtrlChar +03 +BCC
+		// CtrlChar: 'Y'-开费显绿灯,对于语音报价器，则报‘谢谢，请通行'语音'
+		// 'Z'-开费显红灯
 		TOVOX=1;TOFEE=1;TOCPU=0;
 		send_mess(0x02);
 		send_mess('Y');
@@ -1120,6 +1213,7 @@ void control_device()
 	BAR_DOWN=1;BAR_UP=1;
 //--------栏杆控制,这是哪个栏杆?---------------------
 	//control_char1=COMM_buff[3];
+	// ALG_down_bit 初始化的时候为1
 	if(ALG_down_bit==1)
 	{
 		detect_device();                 //后线圈状态刷新  P20200607+
@@ -1169,7 +1263,7 @@ void control_device()
 
 //--------------------------------------
 	ddl_200us(505);					   //244  ms  (P)
-	BAR_DOWN=1;BAR_UP=1;
+	BAR_DOWN=1;BAR_UP=1;		// 这2个是一个下降沿脉冲，宽度为250ms左右
 	detect_time_counter=AUTO_DETCET_TIME;
 }
 
@@ -1180,6 +1274,7 @@ void control_speaker()
  	//control_char1=COMM_buff[3];
 
 	FeedDog();
+	// 逻辑? 要等控制命令被清除后再开启扬声器?
   	if(ALG_up_bit==0&&ALG_down_bit==0)
 	{
 		TOVOX=1;TOFEE=0;TOCPU=0;           //TOCPU=1;      20160419M
@@ -1207,7 +1302,7 @@ void control_speaker()
 		send_mess(COMM_buff[17]);//entrance
 		send_mess(0x03);
 		send_mess(j);
-		TOVOX=0;TOFEE=0;TOCPU=1;
+		TOVOX=0;TOFEE=0;TOCPU=1;  // 完成后返回到默认为接收状态
 	}
 	
 	if(ALG_up_bit==1)
@@ -1312,13 +1407,14 @@ sbit  ALG_up_bit      =control_char1^0;
 sbit  ALG_down_bit    =control_char1^1;
 sbit  Lane_lamp_bit   =control_char1^5;
 */
+// 自动调整逻辑，以防接收到的上位机命令是矛盾的
 void BarOpRectifyLaneLamp(void)
 {
 	if(ALG_up_bit&ALG_down_bit) //return;	//错误操作
-		ALG_down_bit=0;
+		ALG_down_bit=0;		// 如果同时接收到抬杠和降杠，则抬杠
 	FeedDog();
-	if(ALG_up_bit) Lane_lamp_bit=1;		//绿灯
-	if(ALG_down_bit) Lane_lamp_bit=0;	//红灯
+	if(ALG_up_bit) Lane_lamp_bit=1;		//绿灯, 如果抬杠，则必须亮绿灯
+	if(ALG_down_bit) Lane_lamp_bit=0;		//红灯, 如果降杠，则必须亮红灯
 	if((ALG_up_bit|ALG_down_bit)==0) Lane_lamp_bit=LastLaneLampState;
 }
 //==============================================================================================
@@ -1328,7 +1424,7 @@ void FeedDog(void)
 	_nop_();
 	_nop_();
 	_nop_();
-    WDT=1;
+    	WDT=1;
 }
 //==============================================================================================
 char GetControlChar()
